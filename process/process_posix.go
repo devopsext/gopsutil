@@ -5,7 +5,6 @@ package process
 import (
 	"context"
 	"fmt"
-	"github.com/shirou/gopsutil/internal/common"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/shirou/gopsutil/internal/common"
 	"golang.org/x/sys/unix"
 )
 
@@ -80,32 +80,31 @@ func PidExistsWithContext(ctx context.Context, pid int32) (bool, error) {
 		return false, err
 	}
 
-	if ! strings.HasPrefix(common.HostProc(),"/proc") { //Means that proc is mounted not to /proc, and we highly
-	// likely running inside container with a different process namespace (by default), so we check pid existence
-	// based on /<HOST_PROC>/proc/<PID> folder
-		file, err := os.Open(common.HostProc(strconv.Itoa(int(pid))))
-		defer file.Close()
-		if err!=nil{return false, err} else{return true, nil}
-	}else{ //Assume that we are in the same process namespace, try to signal process
+	if _, err := os.Stat(common.HostProc(); err == nil { //Means that proc filesystem exist
+		// Checking PID existence based on existence of /<HOST_PROC>/proc/<PID> folder
+		// This covers the case when running inside container with a different process namespace (by default)
+		_, err := os.Stat(common.HostProc(strconv.Itoa(int(pid))))
+		return err == nil, err
+	}
 
-		//We can signal process only if we run in the same process namespace
-		err = proc.Signal(syscall.Signal(0))
-		if err == nil {
-			return true, nil
-		}
-		if err.Error() == "os: process already finished" {
-			return false, nil
-		}
-		errno, ok := err.(syscall.Errno)
-		if !ok {
-			return false, err
-		}
-		switch errno {
-		case syscall.ESRCH:
-			return false, nil
-		case syscall.EPERM:
-			return true, nil
-		}
+	//proc filesystem is not exist, checking of PID existence is done via signalling the process
+	//! We can signal process only if we run in the same process namespace
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true, nil
+	}
+	if err.Error() == "os: process already finished" {
+		return false, nil
+	}
+	errno, ok := err.(syscall.Errno)
+	if !ok {
+		return false, err
+	}
+	switch errno {
+	case syscall.ESRCH:
+		return false, nil
+	case syscall.EPERM:
+		return true, nil
 	}
 
 	return false, err
